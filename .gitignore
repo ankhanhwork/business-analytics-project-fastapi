@@ -1,0 +1,10 @@
+__pycache__/
+.venv/
+venv/
+env/
+.env
+ngrok.exe
+*.zip
+task.md
+implementation_plan.md
+walkthrough.md
