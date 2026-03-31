@@ -1,38 +1,71 @@
 from fastapi import FastAPI, HTTPException
 from pydantic import BaseModel
-import random
+from datetime import date
+import model_utils
+import uvicorn
 
-app = FastAPI()
+app = FastAPI(title="Hospital Patient Volume Forecast API")
 
-# Định nghĩa cấu trúc dữ liệu đầu vào từ Google Sheets
-class DataInput(BaseModel):
-    feature1: float
-    feature2: float
-    feature3: float
+# Load model and data once at startup
+try:
+    model, feature_cols, history_df = model_utils.load_assets()
+    print("Model and assets loaded successfully.")
+except Exception as e:
+    print(f"Error loading model: {e}")
+    model, feature_cols, history_df = None, None, None
 
-# Định nghĩa cấu trúc dữ liệu đầu ra trả về kết quả dự đoán
+# Input structure
+class PredictionInput(BaseModel):
+    date: date
+    shift: str # "Morning" or "Afternoon"
+    appointments_booked: int
+
+# Output structure
 class PredictionOutput(BaseModel):
-    prediction: float
+    date: str
+    shift: str
+    appointments_booked: int
+    predicted_total_patients: int
     status: str
 
 @app.get("/")
 def read_root():
-    return {"message": "Dự đoán API đang hoạt động!"}
+    return {"message": "Hospital Patient Volume Forecast API is active!"}
 
 @app.post("/predict", response_model=PredictionOutput)
-def predict(data: DataInput):
+def predict_volume(input_data: PredictionInput):
+    if model is None:
+        raise HTTPException(status_code=500, detail="Model not loaded. Please run train.py first.")
+    
     try:
-        # Giả lập mô hình dự đoán (Bạn có thể thay thế bằng mô hình thực tế của mình)
-        # Ví dụ: Một phép toán đơn giản hoặc load model từ file .pkl
-        prediction_result = (data.feature1 * 0.5) + (data.feature2 * 0.3) + (data.feature3 * 0.2)
+        # Convert date to string for the utility function
+        date_str = input_data.date.strftime("%Y-%m-%d")
         
-        # Thêm một chút ngẫu nhiên để thấy sự thay đổi
-        prediction_result += random.uniform(-0.1, 0.1)
+        # Perform prediction
+        result = model_utils.predict(
+            model=model,
+            history_df=history_df,
+            input_date=date_str,
+            input_shift=input_data.shift,
+            appointments_booked=input_data.appointments_booked,
+            feature_cols=feature_cols
+        )
         
-        return PredictionOutput(prediction=round(prediction_result, 2), status="Success")
+        return PredictionOutput(
+            date=date_str,
+            shift=input_data.shift,
+            appointments_booked=input_data.appointments_booked,
+            predicted_total_patients=result,
+            status="Success"
+        )
+    except ValueError as ve:
+        raise HTTPException(status_code=400, detail=str(ve))
     except Exception as e:
-        raise HTTPException(status_code=500, detail=str(e))
+        raise HTTPException(status_code=500, detail=f"Prediction error: {str(e)}")
+
+import os
 
 if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    # Render cung cấp cổng qua biến môi trường PORT
+    port = int(os.environ.get("PORT", 8000))
+    uvicorn.run(app, host="0.0.0.0", port=port)
